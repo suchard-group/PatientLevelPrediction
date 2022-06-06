@@ -56,10 +56,9 @@ covariates <- readRDS("./artifacts/covariates.rds")
 
 ## configure python for bayesbridge
 configure_python(envname = "bayesbridge")
-bayesBridge <- setBayesBridge()
+bayesBridge <- setBayesBridge(n_iter = 500)
 bayesResults <- runPlp(plpData = plpData,
                        outcomeId = 3,
                        populationSettings = populationSettings,
                        modelSettings = bayesBridge,
                        splitSettings = splitSettings)
-

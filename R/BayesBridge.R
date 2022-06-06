@@ -1,7 +1,14 @@
 #' Settings for BayesBridge Logistic Regression
 #' @export
 #' 
-setBayesBridge <- function(seed = NULL){
+setBayesBridge <- function(seed = NULL,
+                           n_iter = 250,
+                           bridge_exponent = 1,
+                           regularizing_slab_size = 1,
+                           thin = 1,
+                           n_status_update = 10,
+                           global_scale = 0.1,
+                           coef_sampler_type = "cholesky"){
   if(is.null(seed[1])){
     seed <- as.integer(sample(100000000,1))
   }
@@ -12,7 +19,14 @@ setBayesBridge <- function(seed = NULL){
     priorfunction = 'Cyclops::createPrior',
     modelType = 'BayesBridge logistic',
     seed = seed[1],
-    name = "BayesBridge Logistic Regression"
+    name = "BayesBridge Logistic Regression",
+    n_iter = n_iter,
+    bridge_exponent = bridge_exponent,
+    regularizing_slab_size = regularizing_slab_size,
+    thin = thin,
+    n_status_update = n_status_update,
+    global_scale = global_scale,
+    coef_sampler_type = coef_sampler_type
   )
   
   attr(param, 'modelType') <- 'binary' 
@@ -25,11 +39,35 @@ setBayesBridge <- function(seed = NULL){
   return(result)
 }
 
+#' Predict BayesBridge Logistic Regression
+#' @export
+#'
+predictBayesBridge <- function(plpModel, data, cohort){
+  start <- Sys.time()
+  prediction <- predictCyclopsType(
+    plpModel$model$coefficients,
+    cohort,
+    data$covariateData,
+    modelType = "logistic"
+  )
+  delta <- Sys.time() - start
+  ParallelLogger::logInfo("Prediction took ", signif(delta, 3), " ", attr(delta, "units"))
+  return(prediction)
+}
+
+
 #' Fit BayesBridge Logistic Regression
 #' @export
 #' 
 fitBayesBridge <- function(trainData, param, analysisId, ...){
   settings <- attr(param, 'settings')
+  
+  start <- Sys.time() 
+  
+  # check plpData is coo format:
+  if (!FeatureExtraction::isCovariateData(trainData$covariateData)){
+    stop("Needs correct covariateData")
+  }
   
   ## Format data into sparse matrix and outcome vector
   trainData$covariateData$labels <- trainData$labels %>% 
@@ -37,7 +75,7 @@ fitBayesBridge <- function(trainData, param, analysisId, ...){
       y = sapply(.data$outcomeCount, function(x) min(1,x)),
       time = .data$survivalTime
     )
-  covariates <- filterCovariateIds(param, trainData$covariateData) %>% arrange(rowId) %>% collect()
+  covariates <- filterCovariateIds(param, trainData$covariateData) %>% arrange(rowId) %>% collect() #time?
   
   #remap covariates
   covIds <- unique(covariates$covariateId)
@@ -54,40 +92,55 @@ fitBayesBridge <- function(trainData, param, analysisId, ...){
   j <- covariates$mappedCovs
   maxi <- length(rowIds)
   maxj <- length(covIds)
-  data <- sparseMatrix(i, j, x = covariates$covariateValue, dims = c(maxi, maxj))
+  data <- sparseMatrix(i, j, x = covariates$covariateValue, dims = c(maxi, maxj)) #what does THIS function do? #time?
   y <- trainData$covariateData$labels %>% select(outcomeCount) %>% collect()
   
+  ParallelLogger::logInfo('Running BayesBridge')
   #run BayesBridge
   model <- create_model(y$outcomeCount, data)
-  prior <- create_prior(bridge_exponent=1, #param
-                        regularizing_slab_size = 1.) #param
+  prior <- create_prior(bridge_exponent = settings$bridge_exponent, #param
+                        regularizing_slab_size = settings$regularizing_slab_size) #param
   bridge <- instantiate_bayesbridge(model, prior)
   
-  n_iter <- 250L #param
-  gibbs_output <- gibbs(bridge, n_iter, thin = 1,
-                        seed = 2021L,
-                        coef_sampler_type = "cholesky",
-                        n_status_update = 10L)
-  mcmc_samples <- gibbs_output$samples
+  n_iter <- settings$n_iter #param
+  gibbs_output <- gibbs(bridge, 
+                        n_iter = as.integer(settings$n_iter), 
+                        init = list(global_scale = settings$global_scale),
+                        thin = settings$thin,
+                        seed = settings$seed,
+                        coef_sampler_type = settings$coef_sampler_type,
+                        n_status_update = settings$n_status_update)
+  mcmc_samples <- gibbs_output$samples #return all posterior samples
   
   #output modelTrained
   modelTrained <- list()
   coefNames <- c("(Intercept)", unique(covariates$covariateId))
   modelTrained$coefficients <- rowMeans(mcmc_samples$coef)
   names(modelTrained$coefficients) <- coefNames
-  modelTrained$priorVariance <- NULL
+  
+  #modelTrained$priorVariance <- NULL
+  
   modelTrained$log_likelihood <- tail(mcmc_samples$logp, 1)
   modelTrained$modelType <- "BayesBridge logistic"
-  modelTrained$modelStatus <- NULL
+  modelTrained$modelStatus <- "OK"
   attr(modelTrained, "class") <- "plpModel"
   
-  #output prediction
-  prediction <- NULL
+  #output prediction on train set
+  ParallelLogger::logTrace('Getting predictions on train set')
+  tempModel <- list(model = modelTrained)
+  attr(tempModel, "modelType") <- attr(param, 'modelType')
+  prediction <- predictBayesBridge(
+    plpModel = tempModel,
+    cohort = trainData$labels, 
+    data = trainData
+  )
+  prediction$evaluationType <- 'Train'
   
   #variable importance, time, cv
-  comp <- 0
-  cvPerFold <- 0
-  variableImportance <- NULL
+  comp <- Sys.time() - start
+  
+  ParallelLogger::logTrace('Getting variable importance')
+  variableImportance <- getVariableImportance(modelTrained, trainData)
   
   result <- list(
     model = modelTrained,
@@ -119,15 +172,14 @@ fitBayesBridge <- function(trainData, param, analysisId, ...){
       cohortId = attr(trainData, "metaData")$cohortId,
       attrition = attr(trainData, "metaData")$attrition, 
       trainingTime = comp,
-      trainingDate = Sys.Date(),
-      hyperParamSearch = cvPerFold
+      trainingDate = Sys.Date()
     ),
     covariateImportance = variableImportance
   )
   
   
   class(result) <- 'plpModel'
-  attr(result, 'predictionFunction') <- 'predictCyclops'
+  attr(result, 'predictionFunction') <- 'predictBayesBridge'
   attr(result, 'modelType') <- attr(param, 'modelType')
   attr(result, 'saveType') <- attr(param, 'saveType')
   return(result)
