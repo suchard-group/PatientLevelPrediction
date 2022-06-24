@@ -42,14 +42,70 @@ setBayesBridge <- function(seed = NULL,
 #' Predict BayesBridge Logistic Regression
 #' @export
 #'
+# predictBayesBridge <- function(plpModel, data, cohort){
+#   start <- Sys.time()
+#   #do this for each sample then median
+#   prediction <- predictCyclopsType(
+#     plpModel$model$postMeans,
+#     cohort,
+#     data$covariateData,
+#     modelType = "logistic"
+#   )
+#   prediction$value <- 
+#   delta <- Sys.time() - start
+#   ParallelLogger::logInfo("Prediction took ", signif(delta, 3), " ", attr(delta, "units"))
+#   return(prediction)
+# }
+
 predictBayesBridge <- function(plpModel, data, cohort){
   start <- Sys.time()
-  prediction <- predictCyclopsType(
-    plpModel$model$coefficients,
-    cohort,
-    data$covariateData,
-    modelType = "logistic"
-  )
+  
+  population <- cohort
+  covariateData <- data$covariateData
+  
+  value <- c()
+  #do this for each sample then median
+  for(i in 1:ncol(plpModel$model$coefRaw)){
+    coefficients <- plpModel$model$coefRaw[,i]
+    names(coefficients) <- plpModel$model$coefNames
+    intercept <- coefficients[names(coefficients)%in%'(Intercept)']
+    if(length(intercept)==0) intercept <- 0
+    coefficients <- coefficients[!names(coefficients)%in%'(Intercept)']
+    coefficients <- data.frame(beta = as.numeric(coefficients),
+                               covariateId = as.numeric(names(coefficients)) #!@ modified 
+    )
+    coefficients <- coefficients[coefficients$beta != 0, ]
+    if(sum(coefficients$beta != 0)>0){
+      covariateData$coefficients <- coefficients
+      on.exit(covariateData$coefficients <- NULL, add = TRUE)
+ 
+      prediction <- covariateData$covariates %>% 
+        dplyr::inner_join(covariateData$coefficients, by= 'covariateId') %>% 
+        dplyr::mutate(values = .data$covariateValue*.data$beta) %>%
+        dplyr::group_by(.data$rowId) %>%
+        dplyr::summarise(value = sum(.data$values, na.rm = TRUE)) %>%
+        dplyr::select(.data$rowId, .data$value)
+
+      prediction <- as.data.frame(prediction)
+      prediction$value[is.na(prediction$value)] <- 0
+      prediction$value <- prediction$value + intercept
+        } else{
+            warning('Model had no non-zero coefficients so predicted same for all population...')
+            prediction <- population
+            prediction$value <- rep(0, nrow(population)) + intercept
+            }
+      link <- function(x) {
+        return(1/(1 + exp(0 - x)))
+        }
+      prediction$value <- link(prediction$value)
+      value <- rbind(value, prediction$value)
+  }
+  
+  valueMed <- apply(value, 2, median)
+  prediction <- merge(population, prediction, by ="rowId", all.x = TRUE, fill = 0)
+  prediction$value <- valueMed
+  attr(prediction, "metaData")$modelType <- 'binary'
+  
   delta <- Sys.time() - start
   ParallelLogger::logInfo("Prediction took ", signif(delta, 3), " ", attr(delta, "units"))
   return(prediction)
@@ -95,7 +151,7 @@ fitBayesBridge <- function(trainData, param, analysisId, ...){
   data <- sparseMatrix(i, j, x = covariates$covariateValue, dims = c(maxi, maxj)) #what does THIS function do? #time?
   y <- trainData$covariateData$labels %>% select(outcomeCount) %>% collect()
   
-  ParallelLogger::logInfo('Running BayesBridge')
+ # ParallelLogger::logInfo('Running BayesBridge')
   #run BayesBridge
   model <- create_model(y$outcomeCount, data)
   prior <- create_prior(bridge_exponent = settings$bridge_exponent, #param
@@ -114,9 +170,10 @@ fitBayesBridge <- function(trainData, param, analysisId, ...){
   
   #output modelTrained
   modelTrained <- list()
-  coefNames <- c("(Intercept)", unique(covariates$covariateId))
-  modelTrained$coefficients <- rowMeans(mcmc_samples$coef)
-  names(modelTrained$coefficients) <- coefNames
+  modelTrained$coefNames <- c("(Intercept)", unique(covariates$covariateId))
+  modelTrained$coefRaw <- mcmc_samples$coef
+  modelTrained$coefficients <- apply(mcmc_samples$coef, 1, median)
+  names(modelTrained$coefficients) <- modelTrained$coefNames
   
   #modelTrained$priorVariance <- NULL
   

@@ -50,9 +50,10 @@ lrResults <- runPlp(plpData = plpData,
                     modelSettings = lr,
                     splitSettings = splitSettings)
 
-train <- readRDS("./artifacts/train.rds")
-test <- readRDS("./artifacts/test.rds")
-covariates <- readRDS("./artifacts/covariates.rds")
+# Artifacts for model fitting
+# train <- readRDS("./artifacts/train.rds")
+# test <- readRDS("./artifacts/test.rds")
+# covariates <- readRDS("./artifacts/covariates.rds")
 
 ## configure python for bayesbridge
 configure_python(envname = "bayesbridge")
