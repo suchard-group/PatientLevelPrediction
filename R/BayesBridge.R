@@ -57,53 +57,55 @@ setBayesBridge <- function(seed = NULL,
 #   return(prediction)
 # }
 
-predictBayesBridge <- function(plpModel, data, cohort){
+predictBayesBridge <- function(plpModel, data, cohort, train = FALSE){
   start <- Sys.time()
   
   population <- cohort
-  covariateData <- data$covariateData
   
-  value <- c()
+  if(train == FALSE){
+    covariates <- data$covariateData$covariates %>% collect()
+    rowIds <- unique(covariates$rowId)
+    mapRows <- tibble(rowId = rowIds,
+                      mappedRows = c(1:length(rowIds)))
+    covariates <- left_join(covariates, plpModel$model$trainData$colMap, by = "covariateId", keep = FALSE) %>%
+      left_join(mapRows, by = "rowId", keep = FALSE)
+    i <- covariates$mappedRows
+    j <- covariates$mappedCovs
+    maxi <- length(rowIds)
+    maxj <- nrow(plpModel$model$trainData$colMap)
+    x <- sparseMatrix(i, j, x = covariates$covariateValue, dims = c(maxi, maxj))
+    data <- list(x = x,
+                 rowMap = mapRows)
+  } else {
+    data <- plpModel$model$trainData
+  }
+  x <- data$x 
+  out <- c()
   #do this for each sample then median
   for(i in 1:ncol(plpModel$model$coefRaw)){
+    
     coefficients <- plpModel$model$coefRaw[,i]
     names(coefficients) <- plpModel$model$coefNames
     intercept <- coefficients[names(coefficients)%in%'(Intercept)']
     if(length(intercept)==0) intercept <- 0
     coefficients <- coefficients[!names(coefficients)%in%'(Intercept)']
-    coefficients <- data.frame(beta = as.numeric(coefficients),
-                               covariateId = as.numeric(names(coefficients)) #!@ modified 
-    )
-    coefficients <- coefficients[coefficients$beta != 0, ]
-    if(sum(coefficients$beta != 0)>0){
-      covariateData$coefficients <- coefficients
-      on.exit(covariateData$coefficients <- NULL, add = TRUE)
- 
-      prediction <- covariateData$covariates %>% 
-        dplyr::inner_join(covariateData$coefficients, by= 'covariateId') %>% 
-        dplyr::mutate(values = .data$covariateValue*.data$beta) %>%
-        dplyr::group_by(.data$rowId) %>%
-        dplyr::summarise(value = sum(.data$values, na.rm = TRUE)) %>%
-        dplyr::select(.data$rowId, .data$value)
-
-      prediction <- as.data.frame(prediction)
-      prediction$value[is.na(prediction$value)] <- 0
-      prediction$value <- prediction$value + intercept
-        } else{
-            warning('Model had no non-zero coefficients so predicted same for all population...')
-            prediction <- population
-            prediction$value <- rep(0, nrow(population)) + intercept
-            }
-      link <- function(x) {
-        return(1/(1 + exp(0 - x)))
-        }
-      prediction$value <- link(prediction$value)
-      value <- rbind(value, prediction$value)
+    beta <- as.numeric(coefficients)
+    value <- x %*% beta
+    value[is.na(value)] <- 0
+    value <- value + intercept
+    link <- function(x){
+      return(1/(1 + exp(0 - x)))
+      }
+     value <- link(value)
+     out <- cbind(out, value)
   }
   
-  valueMed <- apply(value, 2, median)
+  valueMed <- apply(out, 1, median)
+  
+  prediction <- data.frame(rowId = data$rowMap$rowId,
+                           value = valueMed)
   prediction <- merge(population, prediction, by ="rowId", all.x = TRUE, fill = 0)
-  prediction$value <- valueMed
+  
   attr(prediction, "metaData")$modelType <- 'binary'
   
   delta <- Sys.time() - start
@@ -131,8 +133,8 @@ fitBayesBridge <- function(trainData, param, analysisId, ...){
       y = sapply(.data$outcomeCount, function(x) min(1,x)),
       time = .data$survivalTime
     )
-  covariates <- filterCovariateIds(param, trainData$covariateData) %>% arrange(rowId) %>% collect() #time?
   
+  covariates <- filterCovariateIds(param, trainData$covariateData) %>% arrange(rowId) %>% collect() #time?
   #remap covariates
   covIds <- unique(covariates$covariateId)
   rowIds <- unique(covariates$rowId)
@@ -148,12 +150,15 @@ fitBayesBridge <- function(trainData, param, analysisId, ...){
   j <- covariates$mappedCovs
   maxi <- length(rowIds)
   maxj <- length(covIds)
-  data <- sparseMatrix(i, j, x = covariates$covariateValue, dims = c(maxi, maxj)) #what does THIS function do? #time?
+  data <- sparseMatrix(i, j, x = covariates$covariateValue, dims = c(maxi, maxj)) 
+  data <- list(x = data,
+               colMap = map,
+               rowMap = mapRows)
   y <- trainData$covariateData$labels %>% select(outcomeCount) %>% collect()
   
  # ParallelLogger::logInfo('Running BayesBridge')
   #run BayesBridge
-  model <- create_model(y$outcomeCount, data)
+  model <- create_model(y$outcomeCount, data$x)
   prior <- create_prior(bridge_exponent = settings$bridge_exponent, #param
                         regularizing_slab_size = settings$regularizing_slab_size) #param
   bridge <- instantiate_bayesbridge(model, prior)
@@ -170,6 +175,7 @@ fitBayesBridge <- function(trainData, param, analysisId, ...){
   
   #output modelTrained
   modelTrained <- list()
+  modelTrained$trainData <- data
   modelTrained$coefNames <- c("(Intercept)", unique(covariates$covariateId))
   modelTrained$coefRaw <- mcmc_samples$coef
   modelTrained$coefficients <- apply(mcmc_samples$coef, 1, median)
@@ -189,7 +195,8 @@ fitBayesBridge <- function(trainData, param, analysisId, ...){
   prediction <- predictBayesBridge(
     plpModel = tempModel,
     cohort = trainData$labels, 
-    data = trainData
+    data = trainData,
+    train = TRUE
   )
   prediction$evaluationType <- 'Train'
   
