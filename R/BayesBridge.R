@@ -1,4 +1,18 @@
 #' Settings for BayesBridge Logistic Regression
+#' @param seed       An option to add a seed when training the model
+#' @param n_iter Numeric: total number of MCMC iterations i.e. burn-ins + saved posterior draws
+#' @param thin Numeric: Number of iterations per saved samples for “thinning” MCMC to reduce the output size.
+#' @param bridge_exponent Numeric: exponent for bridge prior on regression coefficients (<2). The value of 2 corresponds to the Gaussian prior and 1 corresponds to the double-exponential (Bayesian Lasso) prior.
+#' @param regularizing_slab_size Numeric: Standard deviation of the Gaussian tail-regularizer on the bridge prior.
+#' @param n_status_update Numeric: Number of updates to print during the sampler running
+#' @param global_scale Numeric: Reference prior for a scale parameter
+#' @param coef_sampler_type An object to specify the sampling method to update regression coefficients:
+#' \itemize{
+#'                                         \item{None}{ Chooses a method via a crude heuristic based on model type}
+#'                                         \item{cholesky}{ Cholesky decomposition based sampler}
+#'                                         \item{cg}{ Conjugate gradient sampler preferred over Cholesky for linear and logistic models with large+sparse design matrix}
+#'                                         \item{hmc}{ Hamilton Monte Carlo for other models}
+#'                                         } 
 #' @export
 #' 
 setBayesBridge <- function(seed = NULL,
@@ -42,20 +56,6 @@ setBayesBridge <- function(seed = NULL,
 #' Predict BayesBridge Logistic Regression
 #' @export
 #'
-# predictBayesBridge <- function(plpModel, data, cohort){
-#   start <- Sys.time()
-#   #do this for each sample then median
-#   prediction <- predictCyclopsType(
-#     plpModel$model$postMeans,
-#     cohort,
-#     data$covariateData,
-#     modelType = "logistic"
-#   )
-#   prediction$value <- 
-#   delta <- Sys.time() - start
-#   ParallelLogger::logInfo("Prediction took ", signif(delta, 3), " ", attr(delta, "units"))
-#   return(prediction)
-# }
 
 predictBayesBridge <- function(plpModel, data, cohort, train = FALSE){
   ParallelLogger::logInfo('Starting prediction for test set')
@@ -138,6 +138,7 @@ fitBayesBridge <- function(trainData, param, analysisId, ...){
   
   ParallelLogger::logInfo('Running BayesBridge')
   #run BayesBridge
+  start1 <- Sys.time()
   model <- create_model(labels$outcomeCount, matrixData)
   prior <- create_prior(bridge_exponent = settings$bridge_exponent, #param
                         regularizing_slab_size = settings$regularizing_slab_size) #param
@@ -152,6 +153,8 @@ fitBayesBridge <- function(trainData, param, analysisId, ...){
                         coef_sampler_type = settings$coef_sampler_type,
                         n_status_update = settings$n_status_update)
   mcmc_samples <- gibbs_output$samples #return all posterior samples
+  comp1 <- Sys.time() - start1
+  ParallelLogger::logInfo("MCMC took ", signif(comp1, 3), " ", attr(comp1, "units"))
   
   #output modelTrained
   modelTrained <- list()
@@ -165,6 +168,7 @@ fitBayesBridge <- function(trainData, param, analysisId, ...){
   
   #output prediction on train set
   ParallelLogger::logTrace('Getting predictions on train set')
+  start2 <- Sys.time()
   out <- c()
   #get posterior median predictive values
   for(i in 1:ncol(modelTrained$coefRaw)){
@@ -186,13 +190,13 @@ fitBayesBridge <- function(trainData, param, analysisId, ...){
   valueMed <- apply(out, 1, median)
   labels$value <- valueMed
   prediction <- labels
+  comp2 <- Sys.time() - start2
+  ParallelLogger::logInfo("Prediction for training set took ", signif(comp2, 3), " ", attr(comp2, "units"))
   
   attr(prediction, "metaData")$modelType <- 'binary'
   prediction$evaluationType <- 'Train'
   
   #variable importance
-  comp <- Sys.time() - start
-  
   ParallelLogger::logTrace('Getting variable importance')
   varImp <- data.frame(
     covariateId = as.double(names(modelTrained$coefficients)[names(modelTrained$coefficients)!='(Intercept)']),
@@ -220,6 +224,8 @@ fitBayesBridge <- function(trainData, param, analysisId, ...){
     select(covariateValue)
   covariateRef <- covariateRef %>% arrange(-abs(.data$covariateValue))
   
+  #output result
+  comp <- Sys.time() - start
   result <- list(
     model = modelTrained,
     prediction = prediction,
