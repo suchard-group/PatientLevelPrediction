@@ -82,7 +82,7 @@ predictBayesBridge <- function(plpModel, data, cohort, train = FALSE){
     model <- plpModel
   }
   
-  out <- c()
+  out <- matrix(NA, nrow = nrow(newData), ncol = ncol(plpModel$model$coefRaw))
   #get posterior medians and predicted probabilities
   for(i in 1:ncol(plpModel$model$coefRaw)){
     coefficients <- plpModel$model$coefRaw[,i]
@@ -97,8 +97,8 @@ predictBayesBridge <- function(plpModel, data, cohort, train = FALSE){
     link <- function(x){
       return(1/(1 + exp(0 - x)))
       }
-     value <- link(value)
-     out <- cbind(out, value)
+     value <- link(value) %>% as.vector()
+     out[,i] <- value
   }
   valueMed <- apply(out, 1, median)
   
@@ -169,7 +169,7 @@ fitBayesBridge <- function(trainData, param, analysisId, ...){
   #output prediction on train set
   ParallelLogger::logTrace('Getting predictions on train set')
   start2 <- Sys.time()
-  out <- c()
+  out <- matrix(NA, nrow = nrow(matrixData), ncol = ncol(modelTrained$coefRaw))
   #get posterior median predictive values
   for(i in 1:ncol(modelTrained$coefRaw)){
     coefficients <- modelTrained$coefRaw[,i]
@@ -184,8 +184,8 @@ fitBayesBridge <- function(trainData, param, analysisId, ...){
     link <- function(x){
       return(1/(1 + exp(0 - x)))
     }
-    value <- link(value)
-    out <- cbind(out, value)
+    value <- link(value) %>% as.vector()
+    out[,i] <- value
   }
   valueMed <- apply(out, 1, median)
   labels$value <- valueMed
