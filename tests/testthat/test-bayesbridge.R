@@ -65,3 +65,6 @@ bayesResults <- runPlp(plpData = plpData,
                        splitSettings = splitSettings)
 
 plotPlp(bayesResults, saveLocation = "./bayesSmallPlots")
+
+
+
