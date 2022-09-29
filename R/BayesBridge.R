@@ -82,25 +82,9 @@ predictBayesBridge <- function(plpModel, data, cohort, train = FALSE){
     model <- plpModel
   }
   
-  out <- matrix(NA, nrow = nrow(newData), ncol = ncol(plpModel$model$coefRaw))
-  #get posterior medians and predicted probabilities
-  for(i in 1:ncol(plpModel$model$coefRaw)){
-    coefficients <- plpModel$model$coefRaw[,i]
-    names(coefficients) <- c("(Intercept)", covariateRef$covariateId)
-    intercept <- coefficients[names(coefficients)%in%'(Intercept)']
-    if(length(intercept)==0) intercept <- 0
-    coefficients <- coefficients[!names(coefficients)%in%'(Intercept)']
-    beta <- as.numeric(coefficients)
-    value <- newData %*% beta
-    value[is.na(value)] <- 0
-    value <- value + intercept
-    link <- function(x){
-      return(1/(1 + exp(0 - x)))
-      }
-     value <- link(value) %>% as.vector()
-     out[,i] <- value
-  }
-  valueMed <- apply(out, 1, median)
+  #Get posterior median
+  valueMed <- getLinkPostMedian(x = newData, betas = plpModel$model$samples$coef, 
+                                names = c("(Intercept)", covariateRef$covariateId))
   
   #output
   cohort$value <- valueMed
@@ -120,6 +104,7 @@ predictBayesBridge <- function(plpModel, data, cohort, train = FALSE){
 #' @export
 #' 
 fitBayesBridge <- function(trainData, param, analysisId, ...){
+  param <- param$param
   settings <- attr(param, 'settings')
   
   start <- Sys.time() 
@@ -152,16 +137,14 @@ fitBayesBridge <- function(trainData, param, analysisId, ...){
                         seed = settings$seed,
                         coef_sampler_type = settings$coef_sampler_type,
                         n_status_update = settings$n_status_update)
-  mcmc_samples <- gibbs_output$samples #return all posterior samples
   comp1 <- Sys.time() - start1
   ParallelLogger::logInfo("MCMC took ", signif(comp1, 3), " ", attr(comp1, "units"))
   
   #output modelTrained
   modelTrained <- list()
-  modelTrained$coefRaw <- mcmc_samples$coef
-  modelTrained$coefficients <- apply(mcmc_samples$coef, 1, median)
+  modelTrained$samples <- gibbs_output$samples
+  modelTrained$coefficients <- apply(gibbs_output$samples$coef, 1, median)
   names(modelTrained$coefficients) <- c("(Intercept)", covariateRef$covariateId)
-  modelTrained$log_likelihood <- tail(mcmc_samples$logp, 1)
   modelTrained$modelType <- "BayesBridge logistic"
   modelTrained$modelStatus <- "OK"
   attr(modelTrained, "class") <- "plpModel"
@@ -169,25 +152,8 @@ fitBayesBridge <- function(trainData, param, analysisId, ...){
   #output prediction on train set
   ParallelLogger::logTrace('Getting predictions on train set')
   start2 <- Sys.time()
-  out <- matrix(NA, nrow = nrow(matrixData), ncol = ncol(modelTrained$coefRaw))
-  #get posterior median predictive values
-  for(i in 1:ncol(modelTrained$coefRaw)){
-    coefficients <- modelTrained$coefRaw[,i]
-    names(coefficients) <- c("(Intercept)", covariateRef$covariateId)
-    intercept <- coefficients[names(coefficients)%in%'(Intercept)']
-    if(length(intercept)==0) intercept <- 0
-    coefficients <- coefficients[!names(coefficients)%in%'(Intercept)']
-    beta <- as.numeric(coefficients)
-    value <- matrixData %*% beta
-    value[is.na(value)] <- 0
-    value <- value + intercept
-    link <- function(x){
-      return(1/(1 + exp(0 - x)))
-    }
-    value <- link(value) %>% as.vector()
-    out[,i] <- value
-  }
-  valueMed <- apply(out, 1, median)
+  valueMed <- getLinkPostMedian(x = matrixData, betas = modelTrained$samples$coef, 
+                                names = names(modelTrained$coefficients))
   labels$value <- valueMed
   prediction <- labels
   comp2 <- Sys.time() - start2
@@ -267,4 +233,27 @@ fitBayesBridge <- function(trainData, param, analysisId, ...){
   attr(result, 'modelType') <- attr(param, 'modelType')
   attr(result, 'saveType') <- attr(param, 'saveType')
   return(result)
+}
+
+getLinkPostMedian <- function(x, betas, names){
+  out <- matrix(NA, nrow = nrow(x), ncol = ncol(betas))
+  #get posterior median predictive values
+  for(i in 1:ncol(betas)){
+    coefficients <- betas[,i]
+    names(coefficients) <- names
+    intercept <- coefficients[names(coefficients)%in%'(Intercept)']
+    if(length(intercept)==0) intercept <- 0
+    coefficients <- coefficients[!names(coefficients)%in%'(Intercept)']
+    beta <- as.numeric(coefficients)
+    value <- x %*% beta
+    value[is.na(value)] <- 0
+    value <- value + intercept
+    link <- function(x){
+      return(1/(1 + exp(0 - x)))
+    }
+    value <- link(value) %>% as.vector()
+    out[,i] <- value
+  }
+  valueMed <- apply(out, 1, median)
+  return(valueMed)
 }

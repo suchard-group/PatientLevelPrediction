@@ -1,6 +1,7 @@
 library(Eunomia)
 library(bayesbridger)
 library(Matrix)
+library(FeatureExtraction)
 #Learning PLP logistic regression with Eunomia
 connectionDetails <- getEunomiaConnectionDetails()
 Eunomia::createCohorts(connectionDetails)
@@ -18,7 +19,7 @@ databaseDetails <- createDatabaseDetails(connectionDetails = connectionDetails,
                                          cdmDatabaseName = "bayesbridgeTest",
                                          cohortDatabaseSchema = "main",
                                          cohortTable = "cohort",
-                                         cohortId = 1,
+                                         targetId = 1,
                                          outcomeDatabaseSchema = "main",
                                          outcomeTable = "cohort",
                                          outcomeIds = 3)
