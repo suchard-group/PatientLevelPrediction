@@ -103,8 +103,8 @@ predictBayesBridge <- function(plpModel, data, cohort, train = FALSE){
 #' Fit BayesBridge Logistic Regression
 #' @export
 #' 
-fitBayesBridge <- function(trainData, param, analysisId, ...){
-  param <- param$param
+fitBayesBridge <- function(trainData, modelSettings, analysisId, ...){
+  param <- modelSettings$param
   settings <- attr(param, 'settings')
   
   start <- Sys.time() 
@@ -143,8 +143,8 @@ fitBayesBridge <- function(trainData, param, analysisId, ...){
   #output modelTrained
   modelTrained <- list()
   modelTrained$samples <- gibbs_output$samples
-  modelTrained$coefficients <- apply(gibbs_output$samples$coef, 1, median)
-  names(modelTrained$coefficients) <- c("(Intercept)", covariateRef$covariateId)
+  modelTrained$coefficients <- tibble(betas = apply(gibbs_output$samples$coef, 1, median),
+                                      covariateIds = c("(Intercept)", covariateRef$covariateId))
   modelTrained$modelType <- "BayesBridge logistic"
   modelTrained$modelStatus <- "OK"
   attr(modelTrained, "class") <- "plpModel"
@@ -153,7 +153,7 @@ fitBayesBridge <- function(trainData, param, analysisId, ...){
   ParallelLogger::logTrace('Getting predictions on train set')
   start2 <- Sys.time()
   valueMed <- getLinkPostMedian(x = matrixData, betas = modelTrained$samples$coef, 
-                                names = names(modelTrained$coefficients))
+                                names = modelTrained$coefficients$covariateIds)
   labels$value <- valueMed
   prediction <- labels
   comp2 <- Sys.time() - start2
@@ -165,8 +165,8 @@ fitBayesBridge <- function(trainData, param, analysisId, ...){
   #variable importance
   ParallelLogger::logTrace('Getting variable importance')
   varImp <- data.frame(
-    covariateId = as.double(names(modelTrained$coefficients)[names(modelTrained$coefficients)!='(Intercept)']),
-    value = modelTrained$coefficients[names(modelTrained$coefficients)!='(Intercept)']
+    covariateId = as.double(modelTrained$coefficients$covariateIds[modelTrained$coefficients$covariateIds!='(Intercept)']),
+    value = modelTrained$coefficients$betas[modelTrained$coefficients$covariateIds!='(Intercept)']
   )
   
   if(sum(abs(varImp$value)>0)==0){
@@ -187,7 +187,9 @@ fitBayesBridge <- function(trainData, param, analysisId, ...){
   variableImportance[is.na(variableImportance)] <- 0
   covariateRef$covariateValue <- variableImportance %>% 
     arrange(covariateId) %>% 
-    select(covariateValue)
+    select(covariateValue) %>%
+    t() %>%
+    as.vector()
   covariateRef <- covariateRef %>% arrange(-abs(.data$covariateValue))
   
   #output result
@@ -195,34 +197,34 @@ fitBayesBridge <- function(trainData, param, analysisId, ...){
   result <- list(
     model = modelTrained,
     prediction = prediction,
-    settings = list(
-      plpDataSettings = attr(trainData, "metaData")$plpDataSettings,
+    
+    preprocessing = list(
+      featureEngineering = attr(trainData, "metaData")$featureEngineering,#learned mapping
+      tidyCovariates = attr(trainData$covariateData, "metaData")$tidyCovariateDataSettings,  #learned mapping
+      requireDenseMatrix = F
+    ),
+    
+    modelDesign = PatientLevelPrediction::createModelDesign(
+      targetId = attr(trainData, "metaData")$targetId, 
+      outcomeId = attr(trainData, "metaData")$outcomeId, 
+      restrictPlpDataSettings = attr(trainData, "metaData")$restrictPlpDataSettings, 
       covariateSettings = attr(trainData, "metaData")$covariateSettings,
-      featureEngineering = attr(trainData$covariateData, "metaData")$featureEngineering,
-      tidyCovariates = attr(trainData$covariateData, "metaData")$tidyCovariateDataSettings, 
-      covariateMap = NULL,
-      requireDenseMatrix = F,
-      populationSettings = attr(trainData, "metaData")$populationSettings,
-      modelSettings = list(
-        model = settings$modelType, 
-        param = param,
-        finalModelParameters = list(
-          variance = modelTrained$priorVariance,
-          log_likelihood = modelTrained$log_likelihood
-        ),
-        extraSettings = attr(param, 'settings')
-      ),
+      populationSettings = attr(trainData, "metaData")$populationSettings, 
+      featureEngineeringSettings = attr(trainData, "metaData")$featureEngineeringSettings,
+      preprocessSettings = attr(trainData$covariateData, "metaData")$preprocessSettings,
+      modelSettings = modelSettings, 
       splitSettings = attr(trainData, "metaData")$splitSettings,
       sampleSettings = attr(trainData, "metaData")$sampleSettings
     ),
+    
     trainDetails = list(
       analysisId = analysisId,
-      cdmDatabaseSchema = attr(trainData, "metaData")$cdmDatabaseSchema,
-      outcomeId = attr(trainData, "metaData")$outcomeId,
-      cohortId = attr(trainData, "metaData")$cohortId,
+      developmentDatabase = attr(trainData, "metaData")$cdmDatabaseSchema,
+      developmentDatabaseId = attr(trainData, "metaData")$cdmDatabaseId,
       attrition = attr(trainData, "metaData")$attrition, 
-      trainingTime = comp,
-      trainingDate = Sys.Date()
+      trainingTime =  paste(as.character(abs(comp)), attr(comp,'units')),
+      trainingDate = Sys.Date(),
+      modelName = settings$modelType
     ),
     covariateImportance = covariateRef
   )

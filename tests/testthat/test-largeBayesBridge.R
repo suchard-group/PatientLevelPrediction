@@ -1,6 +1,8 @@
 library(PatientLevelPrediction)
 library(bayesbridger)
 library(Matrix)
+library(FeatureExtraction)
+library(reticulate)
 
 #Run 1: sample size 100,000, without Jenna sparse matrix + MKL + renv... results very slow
 #Run 2: sample size 100,000, without Jenna sparse matrix
@@ -132,7 +134,7 @@ databaseDetails <- createDatabaseDetails(connectionDetails = connectionDetailsMD
                                          cdmDatabaseName = cdmDatabaseName,
                                          cohortDatabaseSchema = cohortDatabaseSchema,
                                          cohortTable = cohortTable,
-                                         cohortId = 1769447,
+                                         targetId = 1769447,
                                          outcomeDatabaseSchema = cohortDatabaseSchema,
                                          outcomeTable = cohortTable,
                                          outcomeIds = 1769448)
@@ -180,9 +182,8 @@ plotPlp(lrResults, saveLocation = "./largeLrPlots4")
 
 ## Plot distribution of regression coefficients
 
-bayesOut <- readRDS("./largeTestBayesFinal/plpResult/runPlp.rds")
-lrOut <- readRDS("./largeTestLrFinal/plpResult/runPlp.rds")
-coefRaw <- readRds("./9-22 coefs/coef.rds")
+bayesOut <- loadPlpResult("./largeTestBayesFinal/plpResult")
+lrOut <- loadPlpResult("./largeTestLrFinal/plpResult")
 
 coefBayes <- bayesOut$covariateSummary %>% 
   mutate(covariateValue = unname(unlist(covariateValue))) %>%
@@ -201,4 +202,9 @@ ggplot(coefBayesPlot, aes(x = covariateValue)) +
 
 ggplot(coefLr, aes(x = covariateValue)) + 
   geom_histogram(bins=500) + 
+  scale_x_continuous(n.breaks = 20)
+
+scaleBayes <- bayesOut$model$model$samples$global_scale %>% as_tibble()
+ggplot(scaleBayes, aes(x = value)) + 
+  geom_histogram(bins = 500) + 
   scale_x_continuous(n.breaks = 20)

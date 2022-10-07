@@ -2,6 +2,8 @@ library(Eunomia)
 library(bayesbridger)
 library(Matrix)
 library(FeatureExtraction)
+library(PatientLevelPrediction)
+library(reticulate)
 #Learning PLP logistic regression with Eunomia
 connectionDetails <- getEunomiaConnectionDetails()
 Eunomia::createCohorts(connectionDetails)
@@ -67,5 +69,17 @@ bayesResults <- runPlp(plpData = plpData,
 
 plotPlp(bayesResults, saveLocation = "./bayesSmallPlots")
 
+model1 <- createModelDesign(targetId = 1,
+                            outcomeId = 3,
+                            restrictPlpDataSettings = restrictPlpDataSettings,
+                            populationSettings = populationSettings,
+                            covariateSettings = cs,
+                            splitSettings = splitSettings,
+                            modelSettings = bayesBridge)
+models <- runMultiplePlp(databaseDetails = databaseDetails,
+                         modelDesignList = list(model1),
+                         saveDirectory = "./smallMultiple1")
+viewMultiplePlp(analysesLocation = "./smallMultiple1")
 
-
+res <- loadPlpResult("./2022-10-06-/plpResult")
+viewPlp(res)
