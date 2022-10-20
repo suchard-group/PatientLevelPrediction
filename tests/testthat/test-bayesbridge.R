@@ -79,7 +79,11 @@ model1 <- createModelDesign(targetId = 1,
 models <- runMultiplePlp(databaseDetails = databaseDetails,
                          modelDesignList = list(model1),
                          saveDirectory = "./smallMultiple1")
+
 viewMultiplePlp(analysesLocation = "./smallMultiple1")
 
 res <- loadPlpResult("./2022-10-06-/plpResult")
 viewPlp(res)
+
+lrRes <- loadPlpResult("./2022-10-17-/plpResult")
+viewPlp(lrRes)

@@ -132,7 +132,8 @@ viewPlps <- function(databaseSettings){
   # set database settings into system variables
   Sys.setenv("plpDatabaseSettings" = as.character(ParallelLogger::convertSettingsToJson(databaseSettings)))
 
-  appDir <- system.file("shiny", "PLPViewer", package = "PatientLevelPrediction")
+  appDir <- "D:/Users/KLi69/OneDrive - JNJ/Documents/R/PatientLevelPredictionSuchard/inst/shiny/PLPViewer"
+  #appDir <- system.file("shiny", "PLPViewer", package = "PatientLevelPrediction")
   #appDir <- "/Users/jreps/Documents/github/PatientLevelPrediction/inst/shiny/PLPViewer"
   shiny::runApp(appDir) 
 }

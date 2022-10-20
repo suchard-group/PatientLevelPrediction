@@ -63,7 +63,7 @@ cs <- createCovariateSettings(useDemographicsGender = TRUE,
                               endDays = -1)
 
 bayesBridge <- setBayesBridge(n_iter = 10000,
-                              coef_sampler_type = "cholesky",
+                              coef_sampler_type = "cg",
                               thin = 10)
 
 configure_python("bayesbridge")
@@ -212,7 +212,7 @@ model16 <- createModelDesign(
   modelSettings = bayesBridge
 )
 
-model7 <- createModelDesign(
+model17 <- createModelDesign(
   targetId = 5430,
   outcomeId = 5431,
   restrictPlpDataSettings = restrictPlpDataSettings,
@@ -221,7 +221,7 @@ model7 <- createModelDesign(
   modelSettings = bayesBridge
 )
 
-model8 <- createModelDesign(
+model18 <- createModelDesign(
   targetId = 5430,
   outcomeId = 5432,
   restrictPlpDataSettings = restrictPlpDataSettings,
@@ -265,5 +265,6 @@ models <- list(model1, model2, model3, model4, model5,
 results <- runMultiplePlp(
   databaseDetails = databaseDetails,
   modelDesignList = models,
-  onlyFetchData = F
+  onlyFetchData = F,
+  saveDirectory = "./bigMultiple1"
 )

@@ -180,6 +180,167 @@ bayesResults <- runPlp(plpData = plpData,
 plotPlp(bayesResults, saveLocation = "./largeBayesPlots3")
 plotPlp(lrResults, saveLocation = "./largeLrPlots4")
 
+## Extend to multiple analyses
+hyper_param <- list(log10_mean = -1.2,
+                    log10_sd = 0.5)
+bridge10 <- setBayesBridge(n_iter = 10000,
+                            coef_sampler_type = "cg",
+                            thin = 10,
+                            bridge_exponent = 0.1,
+                            global_scale_prior_hyper_param = hyper_param)
+
+bridge25 <- setBayesBridge(n_iter = 10000,
+                            coef_sampler_type = "cg",
+                            thin = 10,
+                            bridge_exponent = 0.25,
+                            global_scale_prior_hyper_param = hyper_param)
+
+bridge50 <- setBayesBridge(n_iter = 10000,
+                            coef_sampler_type = "cg",
+                            thin = 10,
+                            bridge_exponent = 0.5,
+                            global_scale_prior_hyper_param = hyper_param)
+
+bridge75 <- setBayesBridge(n_iter = 10000,
+                            coef_sampler_type = "cg",
+                            thin = 10,
+                            bridge_exponent = 0.75,
+                            global_scale_prior_hyper_param = hyper_param)
+
+bridgeMean1Slab5 <- setBayesBridge(n_iter = 10000,
+                                   coef_sampler_type = "cg",
+                                   thin = 10,
+                                   bridge_exponent = 0.75,
+                                   global_scale_prior_hyper_param = list(log10_mean = -1,
+                                                                         log10_sd = 0.5),
+                                   regularizing_slab_size = 0.5/1.96)
+bridgeMean25Slab5 <- setBayesBridge(n_iter = 10000,
+                                   coef_sampler_type = "cg",
+                                   thin = 10,
+                                   bridge_exponent = 0.75,
+                                   global_scale_prior_hyper_param = list(log10_mean = -0.6,
+                                                                         log10_sd = 0.5),
+                                   regularizing_slab_size = 0.5/1.96)
+
+bridgeMean1Slab1 <- setBayesBridge(n_iter = 10000,
+                                    coef_sampler_type = "cg",
+                                    thin = 10,
+                                    bridge_exponent = 0.75,
+                                    global_scale_prior_hyper_param = list(log10_mean = -1,
+                                                                          log10_sd = 0.5),
+                                    regularizing_slab_size = 1/1.96)
+
+bridgeMean25Slab1 <- setBayesBridge(n_iter = 10000,
+                                    coef_sampler_type = "cg",
+                                    thin = 10,
+                                    bridge_exponent = 0.75,
+                                    global_scale_prior_hyper_param = list(log10_mean = -0.6,
+                                                                          log10_sd = 0.5),
+                                    regularizing_slab_size = 1/1.96)
+bridgeDumb <- setBayesBridge(n_iter = 10000,
+                             coef_sampler_type = "cg",
+                             thin = 10,
+                             bridge_exponent = 0.75,
+                             global_scale_prior_hyper_param = list(log10_mean = -25,
+                                                                   log10_sd = 0.5),
+                             regularizing_slab_size = 1/1.96)
+
+mod1 <- createModelDesign(
+        targetId = 1769447,
+        outcomeId = 1769448,
+        restrictPlpDataSettings = restrictPlpDataSettings,
+        populationSettings = populationSettings,
+        covariateSettings = cs,
+        modelSettings = bridge10,
+        splitSettings = splitSettings)
+
+mod2 <- createModelDesign(
+  targetId = 1769447,
+  outcomeId = 1769448,
+  restrictPlpDataSettings = restrictPlpDataSettings,
+  populationSettings = populationSettings,
+  covariateSettings = cs,
+  modelSettings = bridge25,
+  splitSettings = splitSettings)
+
+mod3 <- createModelDesign(
+  targetId = 1769447,
+  outcomeId = 1769448,
+  restrictPlpDataSettings = restrictPlpDataSettings,
+  populationSettings = populationSettings,
+  covariateSettings = cs,
+  modelSettings = bridge50,
+  splitSettings = splitSettings)
+
+mod4 <- createModelDesign(
+  targetId = 1769447,
+  outcomeId = 1769448,
+  restrictPlpDataSettings = restrictPlpDataSettings,
+  populationSettings = populationSettings,
+  covariateSettings = cs,
+  modelSettings = bridge75,
+  splitSettings = splitSettings)
+
+models <- list(mod1, mod2, mod3, mod4)
+
+bayesMultiple <- runMultiplePlp(
+  databaseDetails = databaseDetails,
+  modelDesignList = models,
+  saveDirectory = "./multipleTest1"
+)
+
+mod5 <- createModelDesign(
+  targetId = 1769447,
+  outcomeId = 1769448,
+  restrictPlpDataSettings = restrictPlpDataSettings,
+  populationSettings = populationSettings,
+  covariateSettings = cs,
+  modelSettings = bridgeMean1Slab1,
+  splitSettings = splitSettings)
+
+mod6 <- createModelDesign(
+  targetId = 1769447,
+  outcomeId = 1769448,
+  restrictPlpDataSettings = restrictPlpDataSettings,
+  populationSettings = populationSettings,
+  covariateSettings = cs,
+  modelSettings = bridgeMean1Slab5,
+  splitSettings = splitSettings)
+
+mod7 <- createModelDesign(
+  targetId = 1769447,
+  outcomeId = 1769448,
+  restrictPlpDataSettings = restrictPlpDataSettings,
+  populationSettings = populationSettings,
+  covariateSettings = cs,
+  modelSettings = bridgeMean25Slab1,
+  splitSettings = splitSettings)
+
+mod8 <- createModelDesign(
+  targetId = 1769447,
+  outcomeId = 1769448,
+  restrictPlpDataSettings = restrictPlpDataSettings,
+  populationSettings = populationSettings,
+  covariateSettings = cs,
+  modelSettings = bridgeMean25Slab5,
+  splitSettings = splitSettings)
+
+mod9 <- createModelDesign(
+  targetId = 1769447,
+  outcomeId = 1769448,
+  restrictPlpDataSettings = restrictPlpDataSettings,
+  populationSettings = populationSettings,
+  covariateSettings = cs,
+  modelSettings = bridgeDumb,
+  splitSettings = splitSettings)
+
+models2 <- list(mod5, mod6, mod7, mod8, mod9)
+bayesMultiple <- runMultiplePlp(
+  databaseDetails = databaseDetails,
+  modelDesignList = models2,
+  saveDirectory = "./multipleTest2"
+)
+
 ## Plot distribution of regression coefficients
 
 bayesOut <- loadPlpResult("./largeTestBayesFinal/plpResult")
@@ -208,3 +369,5 @@ scaleBayes <- bayesOut$model$model$samples$global_scale %>% as_tibble()
 ggplot(scaleBayes, aes(x = value)) + 
   geom_histogram(bins = 500) + 
   scale_x_continuous(n.breaks = 20)
+
+mod1 <- loadPlpResult("./multipleTest1/Analysis_1/plpResult")
