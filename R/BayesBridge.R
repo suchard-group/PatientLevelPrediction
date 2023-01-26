@@ -7,6 +7,7 @@
 #' @param n_status_update Numeric: Number of updates to print during the sampler running
 #' @param global_scale Numeric: Reference prior for a scale parameter
 #' @param coef_sampler_type An object to specify the sampling method to update regression coefficients:
+#' @param params_to_fix A vector to specify parameters to be fixed during MCMC sampling. Currently only supports "global_scale".
 #' \itemize{
 #'                                         \item{None}{ Chooses a method via a crude heuristic based on model type}
 #'                                         \item{cholesky}{ Cholesky decomposition based sampler}
@@ -22,7 +23,8 @@ setBayesBridge <- function(seed = NULL,
                            thin = 1,
                            n_status_update = 10,
                            global_scale = 0.1,
-                           coef_sampler_type = "cholesky"){
+                           coef_sampler_type = "cholesky",
+                           params_to_fix = c()){
   if(is.null(seed[1])){
     seed <- as.integer(sample(100000000,1))
   }
@@ -40,7 +42,8 @@ setBayesBridge <- function(seed = NULL,
     thin = thin,
     n_status_update = n_status_update,
     global_scale = global_scale,
-    coef_sampler_type = coef_sampler_type
+    coef_sampler_type = coef_sampler_type,
+    params_to_fix = params_to_fix
   )
   
   attr(param, 'modelType') <- 'binary' 
@@ -130,13 +133,23 @@ fitBayesBridge <- function(trainData, modelSettings, analysisId, ...){
   bridge <- instantiate_bayesbridge(model, prior)
   
   n_iter <- settings$n_iter #param
+  
+  #Fix global scale for sampler:
+  if ("global_scale" %in% settings$params_to_fix){
+    options <- list("global_scale_update" = NULL)
+  } else{
+    options <- NULL
+  }
+  
   gibbs_output <- gibbs(bridge, 
                         n_iter = as.integer(settings$n_iter), 
                         init = list(global_scale = settings$global_scale),
                         thin = settings$thin,
                         seed = settings$seed,
                         coef_sampler_type = settings$coef_sampler_type,
-                        n_status_update = settings$n_status_update)
+                        n_status_update = settings$n_status_update,
+                        options = options)
+  
   comp1 <- Sys.time() - start1
   ParallelLogger::logInfo("MCMC took ", signif(comp1, 3), " ", attr(comp1, "units"))
   
