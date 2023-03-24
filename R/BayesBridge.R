@@ -18,15 +18,29 @@
 #' 
 setBayesBridge <- function(seed = NULL,
                            n_iter = 250,
+                           n_burnin = 100,
                            bridge_exponent = 1,
                            regularizing_slab_size = 1,
                            thin = 1,
                            n_status_update = 10,
-                           global_scale = 0.1,
+                           init = list(global_scale = 0.1),
                            coef_sampler_type = "cholesky",
-                           params_to_fix = c()){
+                           params_to_fix = c(),
+                           fixed_effects = NULL){
   if(is.null(seed[1])){
     seed <- as.integer(sample(100000000,1))
+  }
+  
+  if(is.data.frame(fixed_effects)){
+    n_fixed_effects <- nrow(fixed_effects)
+    sd_for_fixed_effects <- fixed_effects$sd
+    mean_for_fixed_effects <- fixed_effects$mean
+    covariateIdFixed <- fixed_effects$covariateId
+  } else{
+    n_fixed_effects <- 0
+    sd_for_fixed_effects <- Inf
+    mean_for_fixed_effects <- Inf
+    covariateIdFixed <- NULL
   }
   
   param <- list()
@@ -36,14 +50,19 @@ setBayesBridge <- function(seed = NULL,
     modelType = 'BayesBridge logistic',
     seed = seed[1],
     name = "BayesBridge Logistic Regression",
+    n_burnin = n_burnin,
     n_iter = n_iter,
     bridge_exponent = bridge_exponent,
     regularizing_slab_size = regularizing_slab_size,
     thin = thin,
     n_status_update = n_status_update,
-    global_scale = global_scale,
+    init = init,
     coef_sampler_type = coef_sampler_type,
-    params_to_fix = params_to_fix
+    params_to_fix = params_to_fix,
+    n_fixed_effects = n_fixed_effects,
+    sd_for_fixed_effects = sd_for_fixed_effects,
+    mean_for_fixed_effects = mean_for_fixed_effects,
+    covariateIdFixed = covariateIdFixed
   )
   
   attr(param, 'modelType') <- 'binary' 
@@ -116,7 +135,6 @@ fitBayesBridge <- function(trainData, modelSettings, analysisId, ...){
   if (!FeatureExtraction::isCovariateData(trainData$covariateData)){
     stop("Needs correct covariateData")
   }
-
   
   #remap covariates
   mappedData <- toSparseM(trainData)
@@ -124,12 +142,23 @@ fitBayesBridge <- function(trainData, modelSettings, analysisId, ...){
   labels <- mappedData$labels
   covariateRef <- mappedData$covariateRef
   
+  #check for fixed effects
+  if(settings$n_fixed_effect > 0){
+    indexFixed <- which(covariateRef$covariateId %in% settings$covariateIdFixed)
+    matrixData <- rbind(matrixData[indexFixed,], matrixData[-indexFixed,])
+    labels <- rbind(labels[indexFixed,], labels[-indexFixed, ])
+    covariateRef <- rbind(covariateRef[indexFixed,], covariateRef[-indexFixed,])
+  }
+  
   ParallelLogger::logInfo('Running BayesBridge')
   #run BayesBridge
   start1 <- Sys.time()
   model <- create_model(labels$outcomeCount, matrixData)
   prior <- create_prior(bridge_exponent = settings$bridge_exponent, #param
-                        regularizing_slab_size = settings$regularizing_slab_size) #param
+                        regularizing_slab_size = settings$regularizing_slab_size,
+                        n_fixed_effect = as.integer(settings$n_fixed_effect),
+                        sd_for_fixed_effect = settings$sd_for_fixed_effect,
+                        mean_for_fixed_effect = settings$mean_for_fixed_effect) #param
   bridge <- instantiate_bayesbridge(model, prior)
   
   n_iter <- settings$n_iter #param
@@ -142,8 +171,9 @@ fitBayesBridge <- function(trainData, modelSettings, analysisId, ...){
   }
   
   gibbs_output <- gibbs(bridge, 
+                        n_burnin = as.integer(settings$n_burnin),
                         n_iter = as.integer(settings$n_iter), 
-                        init = list(global_scale = settings$global_scale),
+                        init = settings$init,
                         thin = settings$thin,
                         seed = settings$seed,
                         coef_sampler_type = settings$coef_sampler_type,
@@ -156,7 +186,7 @@ fitBayesBridge <- function(trainData, modelSettings, analysisId, ...){
   #output modelTrained
   modelTrained <- list()
   modelTrained$samples <- gibbs_output$samples
-  modelTrained$coefficients <- tibble(betas = apply(gibbs_output$samples$coef, 1, median),
+  modelTrained$coefficients <- tibble(betas = apply(modelTrained$samples$coef, 1, median),
                                       covariateIds = c("(Intercept)", covariateRef$covariateId))
   modelTrained$modelType <- "BayesBridge logistic"
   modelTrained$modelStatus <- "OK"

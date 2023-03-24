@@ -8,7 +8,7 @@ library(reticulate)
 connectionDetails <- getEunomiaConnectionDetails()
 Eunomia::createCohorts(connectionDetails)
 cs <- createCovariateSettings(useDemographicsGender = TRUE,
-                              useDemographicsAge = TRUE,
+                              useDemographicsAgeGroup = TRUE,
                               useConditionGroupEraLongTerm = TRUE,
                               useConditionGroupEraAnyTimePrior = TRUE,
                               useDrugGroupEraLongTerm = TRUE,
@@ -59,13 +59,33 @@ lrResults <- runPlp(plpData = plpData,
 # covariates <- readRDS("./artifacts/covariates.rds")
 
 ## configure python for bayesbridge
-bayesBridge <- setBayesBridge(n_iter = 500,
-                              params_to_fix = c("global_scale"))
+bayesBridge <- setBayesBridge(n_iter = 3000,
+                              n_burnin = 500,
+                              bridge_exponent = 0.5,
+                              coef_sampler_type = "cg")
 bayesResults <- runPlp(plpData = plpData,
                        outcomeId = 3,
                        populationSettings = populationSettings,
                        modelSettings = bayesBridge,
                        splitSettings = splitSettings)
+coef1 <- bayesResults$model$model$coefficients
+
+fixed_effects <- tibble(covariateId = c(8532001, 78272209, 8003),
+                        mean = c(10, 20, 30),
+                        sd = rep(0.0001, 3))
+
+bayesBridgeFixed <- setBayesBridge(n_iter = 5000,
+                              n_burnin = 500,
+                              bridge_exponent = 0.5,
+                              fixed_effects = fixed_effects,
+                              coef_sampler_type = "cg")
+bayesResultsFixed <- runPlp(plpData = plpData,
+                       outcomeId = 3,
+                       populationSettings = populationSettings,
+                       modelSettings = bayesBridgeFixed,
+                       splitSettings = splitSettings)
+coef2 <- bayesResultsFixed$model$model$coefficients
+
 
 plotPlp(bayesResults, saveLocation = "./bayesSmallPlots")
 

@@ -165,17 +165,19 @@ lrResults <- runPlp(plpData = plpData,
                     outcomeId = 1769448,#3046,
                     populationSettings = populationSettings,
                     modelSettings = lr,
-                    splitSettings = splitSettings)
+                    splitSettings = splitSettings,
+                    saveDirectory = "E:/Li_Python/lr")
 
 configure_python(envname = "bayesbridge")
 bayesBridge <- setBayesBridge(n_iter = 10000,
-                              coef_sampler_type = "cg",
+                              coef_sampler_type = "cholesky",
                               thin = 10)
 bayesResults <- runPlp(plpData = plpData,
                        outcomeId = 1769448,#3046,
                        populationSettings = populationSettings,
                        modelSettings = bayesBridge,
-                       splitSettings = splitSettings)
+                       splitSettings = splitSettings,
+                       saveDirectory = "E:/Li_Python/bayes")
 
 plotPlp(bayesResults, saveLocation = "./largeBayesPlots3")
 plotPlp(lrResults, saveLocation = "./largeLrPlots4")
@@ -348,9 +350,11 @@ lrOut <- loadPlpResult("./largeTestLrFinal/plpResult")
 
 coefBayes <- bayesOut$covariateSummary %>% 
   mutate(covariateValue = unname(unlist(covariateValue))) %>%
-  na.omit() %>% arrange(-abs(covariateValue))
+  na.omit() %>% mutate(index = row_number()) %>% arrange(-abs(covariateValue))
 coefLr <- lrOut$covariateSummary %>%
   na.omit() %>% arrange(-abs(covariateValue)) 
+
+
 
 coefBayesPlot <- coefBayes[-1,] 
 
@@ -371,3 +375,8 @@ ggplot(scaleBayes, aes(x = value)) +
   scale_x_continuous(n.breaks = 20)
 
 mod1 <- loadPlpResult("./multipleTest1/Analysis_1/plpResult")
+
+par(mfrow = c(1,1))
+hist(plotcoef, breaks = 100, 
+     main = "Distribution of coefficient: Cerebrovascular disease",
+     xlab = "Value")
