@@ -86,6 +86,20 @@ bayesResultsFixed <- runPlp(plpData = plpData,
                        splitSettings = splitSettings)
 coef2 <- bayesResultsFixed$model$model$coefficients
 
+mixture <- tibble(covariateId = c(8532001, 78272209, 8003),
+                        mean = c(10, 20, 30),
+                        sd = rep(0.0001, 3))
+bayesBridgeMixture <- setBayesBridge(n_iter = 5000,
+                                   n_burnin = 500,
+                                   bridge_exponent = 0.5,
+                                   mixture = mixture,
+                                   coef_sampler_type = "cg")
+bayesResultsMixture <- runPlp(plpData = plpData,
+                              outcomeId = 3,
+                              populationSettings = populationSettings,
+                              modelSettings = bayesBridgeMixture,
+                              splitSettings = splitSettings)
+
 
 plotPlp(bayesResults, saveLocation = "./bayesSmallPlots")
 

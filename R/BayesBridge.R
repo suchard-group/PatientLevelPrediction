@@ -26,7 +26,9 @@ setBayesBridge <- function(seed = NULL,
                            init = list(global_scale = 0.1),
                            coef_sampler_type = "cholesky",
                            params_to_fix = c(),
-                           fixed_effects = NULL){
+                           params_to_save = c('coef', 'global_scale', 'logp'),
+                           fixed_effects = NULL,
+                           mixture = NULL){
   if(is.null(seed[1])){
     seed <- as.integer(sample(100000000,1))
   }
@@ -41,6 +43,19 @@ setBayesBridge <- function(seed = NULL,
     sd_for_fixed_effects <- Inf
     mean_for_fixed_effects <- Inf
     covariateIdFixed <- NULL
+  }
+  
+  if(is.data.frame(mixture)){
+    n_mixture <- nrow(mixture)
+    sd_for_mixture <- mixture$sd
+    mean_for_mixture <- mixture$mean
+    covariateIdMixture <- mixture$covariateId
+    params_to_save <- c(params_to_save, 'gamma')
+  } else{
+    n_mixture <- 0
+    sd_for_mixture <- Inf
+    mean_for_mixture <- Inf
+    covariateIdMixture <- NULL
   }
   
   param <- list()
@@ -59,10 +74,15 @@ setBayesBridge <- function(seed = NULL,
     init = init,
     coef_sampler_type = coef_sampler_type,
     params_to_fix = params_to_fix,
+    params_to_save = params_to_save,
     n_fixed_effects = n_fixed_effects,
     sd_for_fixed_effects = sd_for_fixed_effects,
     mean_for_fixed_effects = mean_for_fixed_effects,
-    covariateIdFixed = covariateIdFixed
+    covariateIdFixed = covariateIdFixed,
+    n_mixture = n_mixture,
+    sd_for_mixture = sd_for_mixture,
+    mean_for_mixture = mean_for_mixture,
+    covariateIdMixture = covariateIdMixture
   )
   
   attr(param, 'modelType') <- 'binary' 
@@ -149,6 +169,12 @@ fitBayesBridge <- function(trainData, modelSettings, analysisId, ...){
     labels <- rbind(labels[indexFixed,], labels[-indexFixed, ])
     covariateRef <- rbind(covariateRef[indexFixed,], covariateRef[-indexFixed,])
   }
+  if(settings$n_mixture > 0){
+    indexMixture <- which(covariateRef$covariateId %in% settings$covariateIdMixture)
+    matrixData <- rbind(matrixData[indexMixture,], matrixData[-indexMixture,])
+    labels <- rbind(labels[indexMixture,], labels[-indexMixture, ])
+    covariateRef <- rbind(covariateRef[indexMixture,], covariateRef[-indexMixture,])
+  }
   
   ParallelLogger::logInfo('Running BayesBridge')
   #run BayesBridge
@@ -158,7 +184,10 @@ fitBayesBridge <- function(trainData, modelSettings, analysisId, ...){
                         regularizing_slab_size = settings$regularizing_slab_size,
                         n_fixed_effect = as.integer(settings$n_fixed_effect),
                         sd_for_fixed_effect = settings$sd_for_fixed_effect,
-                        mean_for_fixed_effect = settings$mean_for_fixed_effect) #param
+                        mean_for_fixed_effect = settings$mean_for_fixed_effect,
+                        n_mixture = as.integer(settings$n_mixture),
+                        sd_for_mixture = settings$sd_for_mixture,
+                        mean_for_mixture = settings$mean_for_mixture) #param
   bridge <- instantiate_bayesbridge(model, prior)
   
   n_iter <- settings$n_iter #param
@@ -178,6 +207,7 @@ fitBayesBridge <- function(trainData, modelSettings, analysisId, ...){
                         seed = settings$seed,
                         coef_sampler_type = settings$coef_sampler_type,
                         n_status_update = settings$n_status_update,
+                        params_to_save = settings$params_to_save,
                         options = options)
   
   comp1 <- Sys.time() - start1
