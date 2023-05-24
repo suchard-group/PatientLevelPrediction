@@ -4,6 +4,7 @@ library(Matrix)
 library(FeatureExtraction)
 library(PatientLevelPrediction)
 library(reticulate)
+use_condaenv("bayesbridgemac")
 #Learning PLP logistic regression with Eunomia
 connectionDetails <- getEunomiaConnectionDetails()
 Eunomia::createCohorts(connectionDetails)
@@ -74,7 +75,7 @@ fixed_effects <- tibble(covariateId = c(8532001, 78272209, 8003),
                         mean = c(10, 20, 30),
                         sd = rep(0.0001, 3))
 
-bayesBridgeFixed <- setBayesBridge(n_iter = 5000,
+bayesBridgeFixed <- setBayesBridge(n_iter = 2000,
                               n_burnin = 500,
                               bridge_exponent = 0.5,
                               fixed_effects = fixed_effects,
@@ -87,19 +88,38 @@ bayesResultsFixed <- runPlp(plpData = plpData,
 coef2 <- bayesResultsFixed$model$model$coefficients
 
 mixture <- tibble(covariateId = c(8532001, 78272209, 8003),
-                        mean = c(10, 20, 30),
-                        sd = rep(0.0001, 3))
+                  mean = c(10, 20, 30),
+                  sd = rep(0.0001, 3))
 bayesBridgeMixture <- setBayesBridge(n_iter = 5000,
                                    n_burnin = 500,
                                    bridge_exponent = 0.5,
                                    mixture = mixture,
-                                   coef_sampler_type = "cg")
+                                   coef_sampler_type = "cg",
+                                   local_scale_sampler_type = "shrunk_only",
+                                   params_to_save = c('coef', 'global_scale', 'logp', 'local_scale'))
 bayesResultsMixture <- runPlp(plpData = plpData,
                               outcomeId = 3,
                               populationSettings = populationSettings,
                               modelSettings = bayesBridgeMixture,
                               splitSettings = splitSettings)
+coef3 <- bayesResultsMixture$model$model$coefficients
 
+mixture2 <- tibble(covariateId = c(4027663209, 1728416409, 8003),
+                  mean = c(1.67, -0.106, 30),
+                  sd = c(0.5, 0.03, 1))
+bayesBridgeMixture2 <- setBayesBridge(n_iter = 5000,
+                                     n_burnin = 500,
+                                     bridge_exponent = 0.5,
+                                     mixture = mixture2,
+                                     coef_sampler_type = "cg",
+                                     local_scale_sampler_type = "shrunk_only",
+                                     params_to_save = c('coef', 'global_scale', 'logp', 'local_scale'))
+bayesResultsMixture2 <- runPlp(plpData = plpData,
+                              outcomeId = 3,
+                              populationSettings = populationSettings,
+                              modelSettings = bayesBridgeMixture2,
+                              splitSettings = splitSettings)
+coef4 <- bayesResultsMixture2$model$model$coefficients
 
 plotPlp(bayesResults, saveLocation = "./bayesSmallPlots")
 

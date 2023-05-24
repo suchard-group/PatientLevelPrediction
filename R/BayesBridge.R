@@ -26,6 +26,7 @@ setBayesBridge <- function(seed = NULL,
                            init = list(global_scale = 0.1),
                            coef_sampler_type = "cholesky",
                            params_to_fix = c(),
+                           local_scale_sampler_type = "all",
                            params_to_save = c('coef', 'global_scale', 'logp'),
                            fixed_effects = NULL,
                            mixture = NULL){
@@ -35,27 +36,15 @@ setBayesBridge <- function(seed = NULL,
   
   if(is.data.frame(fixed_effects)){
     n_fixed_effects <- nrow(fixed_effects)
-    sd_for_fixed_effects <- fixed_effects$sd
-    mean_for_fixed_effects <- fixed_effects$mean
-    covariateIdFixed <- fixed_effects$covariateId
   } else{
     n_fixed_effects <- 0
-    sd_for_fixed_effects <- Inf
-    mean_for_fixed_effects <- Inf
-    covariateIdFixed <- NULL
   }
   
   if(is.data.frame(mixture)){
     n_mixture <- nrow(mixture)
-    sd_for_mixture <- mixture$sd
-    mean_for_mixture <- mixture$mean
-    covariateIdMixture <- mixture$covariateId
     params_to_save <- c(params_to_save, 'gamma')
   } else{
     n_mixture <- 0
-    sd_for_mixture <- Inf
-    mean_for_mixture <- Inf
-    covariateIdMixture <- NULL
   }
   
   param <- list()
@@ -74,15 +63,12 @@ setBayesBridge <- function(seed = NULL,
     init = init,
     coef_sampler_type = coef_sampler_type,
     params_to_fix = params_to_fix,
+    local_scale_sampler_type = local_scale_sampler_type,
     params_to_save = params_to_save,
+    fixed_effects = fixed_effects,
     n_fixed_effects = n_fixed_effects,
-    sd_for_fixed_effects = sd_for_fixed_effects,
-    mean_for_fixed_effects = mean_for_fixed_effects,
-    covariateIdFixed = covariateIdFixed,
-    n_mixture = n_mixture,
-    sd_for_mixture = sd_for_mixture,
-    mean_for_mixture = mean_for_mixture,
-    covariateIdMixture = covariateIdMixture
+    mixture = mixture,
+    n_mixture = n_mixture
   )
   
   attr(param, 'modelType') <- 'binary' 
@@ -112,6 +98,7 @@ predictBayesBridge <- function(plpModel, data, cohort, train = FALSE){
         dplyr::select(.data$columnId, .data$covariateId)
     )
     newData <- matrixObjects$dataMatrix
+    colnames(newData) <- matrixObjects$covariateMap %>% arrange(columnId) %>% pull(covariateId)
     cohort <- matrixObjects$labels
     covariateRef <- matrixObjects$covariateRef
   } else{
@@ -125,8 +112,7 @@ predictBayesBridge <- function(plpModel, data, cohort, train = FALSE){
   }
   
   #Get posterior median
-  valueMed <- getLinkPostMedian(x = newData, betas = plpModel$model$samples$coef, 
-                                names = c("(Intercept)", covariateRef$covariateId))
+  valueMed <- getLinkPostMedian(x = newData, betas = plpModel$model$samples$coef)
   
   #output
   cohort$value <- valueMed
@@ -159,21 +145,44 @@ fitBayesBridge <- function(trainData, modelSettings, analysisId, ...){
   #remap covariates
   mappedData <- toSparseM(trainData)
   matrixData <- mappedData$dataMatrix
+  colnames(matrixData) <- mappedData$covariateMap %>% arrange(columnId) %>% pull(covariateId)
   labels <- mappedData$labels
   covariateRef <- mappedData$covariateRef
   
   #check for fixed effects
-  if(settings$n_fixed_effect > 0){
-    indexFixed <- which(covariateRef$covariateId %in% settings$covariateIdFixed)
-    matrixData <- rbind(matrixData[indexFixed,], matrixData[-indexFixed,])
-    labels <- rbind(labels[indexFixed,], labels[-indexFixed, ])
-    covariateRef <- rbind(covariateRef[indexFixed,], covariateRef[-indexFixed,])
-  }
+  sd_for_mixture <- Inf
+  mean_for_mixture <- Inf
+  sd_for_fixed_effect <- Inf
+  mean_for_fixed_effect <- Inf
   if(settings$n_mixture > 0){
-    indexMixture <- which(covariateRef$covariateId %in% settings$covariateIdMixture)
-    matrixData <- rbind(matrixData[indexMixture,], matrixData[-indexMixture,])
-    labels <- rbind(labels[indexMixture,], labels[-indexMixture, ])
-    covariateRef <- rbind(covariateRef[indexMixture,], covariateRef[-indexMixture,])
+    if(length(mixture$covariateId) != length(unique(mixture$covariateId))){
+      ParallelLogger::logError("Multiple means and standard deviations specified for one covariate.")
+    }
+    mixture <- settings$mixture %>% filter(covariateId %in% colnames(matrixData)) %>%
+      mutate(covariateId = as.character(covariateId))
+    matrixDataMixture <- matrixData[,mixture$covariateId]
+    matrixData <- matrixData[,!colnames(matrixData) %in% mixture$covariateId]
+    sd_for_mixture <- mixture$sd
+    mean_for_mixture <- mixture$mean
+  } 
+  if(settings$n_fixed_effect > 0){
+    if(length(fixed_effects$covariateId) != length(unique(fixed_effects$covariateId))){
+      ParallelLogger::logError("Multiple means and standard deviations specified for one covariate.")
+    }
+    fixed_effects <- settings$fixed_effects %>% filter(covariateId %in% colnames(matrixData)) %>%
+      mutate(covariateId = as.character(covariateId))
+    matrixDataFixed <- matrixData[,fixed_effects$covariateId]
+    matrixData <- matrixData[,!colnames(matrixData) %in% fixed_effects$covariateId]
+    sd_for_fixed_effect <- fixed_effects$sd
+    mean_for_fixed_effect <- fixed_effects$mean
+  }
+
+  if(exists("matrixDataFixed") && exists("matrixDataMixture")){
+    matrixData <- cbind(matrixDataFixed, matrixDataMixture, matrixData)
+  } else if (exists("matrixDataFixed") && !exists("matrixDataMixture")){
+    matrixData <- cbind(matrixDataFixed, matrixData)
+  } else if (!exists("matrixDataFixed") && exists("matrixDataMixture")){
+    matrixData <- cbind(matrixDataMixture, matrixData)
   }
   
   ParallelLogger::logInfo('Running BayesBridge')
@@ -183,18 +192,22 @@ fitBayesBridge <- function(trainData, modelSettings, analysisId, ...){
   prior <- create_prior(bridge_exponent = settings$bridge_exponent, #param
                         regularizing_slab_size = settings$regularizing_slab_size,
                         n_fixed_effect = as.integer(settings$n_fixed_effect),
-                        sd_for_fixed_effect = settings$sd_for_fixed_effect,
-                        mean_for_fixed_effect = settings$mean_for_fixed_effect,
+                        sd_for_fixed_effect = sd_for_fixed_effect,
+                        mean_for_fixed_effect = mean_for_fixed_effect,
                         n_mixture = as.integer(settings$n_mixture),
-                        sd_for_mixture = settings$sd_for_mixture,
-                        mean_for_mixture = settings$mean_for_mixture) #param
+                        sd_for_mixture = sd_for_mixture,
+                        mean_for_mixture = mean_for_mixture) #param
   bridge <- instantiate_bayesbridge(model, prior)
   
   n_iter <- settings$n_iter #param
   
-  #Fix global scale for sampler:
+  # Options for global scale and local scale sampling:
+  options <- list()
   if ("global_scale" %in% settings$params_to_fix){
     options <- list("global_scale_update" = NULL)
+    } 
+  if (settings$local_scale_sampler_type != "all"){
+    options <- c(options, list("local_scale_update" = settings$local_scale_sampler_type))
   } else{
     options <- NULL
   }
@@ -216,8 +229,9 @@ fitBayesBridge <- function(trainData, modelSettings, analysisId, ...){
   #output modelTrained
   modelTrained <- list()
   modelTrained$samples <- gibbs_output$samples
+  rownames(modelTrained$samples$coef) <- c("(Intercept)", colnames(matrixData))
   modelTrained$coefficients <- tibble(betas = apply(modelTrained$samples$coef, 1, median),
-                                      covariateIds = c("(Intercept)", covariateRef$covariateId))
+                                      covariateIds = rownames(modelTrained$samples$coef))
   modelTrained$modelType <- "BayesBridge logistic"
   modelTrained$modelStatus <- "OK"
   attr(modelTrained, "class") <- "plpModel"
@@ -225,8 +239,7 @@ fitBayesBridge <- function(trainData, modelSettings, analysisId, ...){
   #output prediction on train set
   ParallelLogger::logTrace('Getting predictions on train set')
   start2 <- Sys.time()
-  valueMed <- getLinkPostMedian(x = matrixData, betas = modelTrained$samples$coef, 
-                                names = modelTrained$coefficients$covariateIds)
+  valueMed <- getLinkPostMedian(x = matrixData, betas = modelTrained$samples$coef)
   labels$value <- valueMed
   prediction <- labels
   comp2 <- Sys.time() - start2
@@ -310,12 +323,11 @@ fitBayesBridge <- function(trainData, modelSettings, analysisId, ...){
   return(result)
 }
 
-getLinkPostMedian <- function(x, betas, names){
+getLinkPostMedian <- function(x, betas){
   out <- matrix(NA, nrow = nrow(x), ncol = ncol(betas))
   #get posterior median predictive values
   for(i in 1:ncol(betas)){
     coefficients <- betas[,i]
-    names(coefficients) <- names
     intercept <- coefficients[names(coefficients)%in%'(Intercept)']
     if(length(intercept)==0) intercept <- 0
     coefficients <- coefficients[!names(coefficients)%in%'(Intercept)']
