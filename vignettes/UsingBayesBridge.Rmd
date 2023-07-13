@@ -1,0 +1,68 @@
+---
+title: "UsingBayesBridge"
+author: "Kelly Li"
+date: "7/13/2023"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(eval = FALSE)
+```
+
+# Github dependencies
+The Bayesian logistic regression model is dependent on the following package versions:
+- k-m-li/bayesbridge @develop  python package for all Bayesian machinery
+- OHDSI / BayesBridgeR @develop   R wrapper for bayesbridge
+- suchard-group/PatientLevelPrediction @develop  PLP fork
+
+# Installation
+I use conda for all of the python to R installations. First, create a local copy of bayesbridge and configure a conda environment for all analyses involving bayesbridge:
+```{bash}
+conda create -n bayesbridge python=3.8
+conda activate bayesbridge
+conda install path-to-bayesbridge
+```
+
+To set up the R wrapper, we use `reticulate` with its conda compatibility:
+```{r}
+library(reticulate)
+#Check if bayesbridge is in the detected environments:
+conda_list()
+#Use correct environment:
+use_condaenv("bayesbridge")
+```
+
+It is important to make sure that the 'bayesbridge' environment is always active by running `use_condaenv` at the start of each session.
+
+Future work will be done to streamline the process entirely within R.
+
+# Sample code
+We assume that we have the `plpData` object and all analyses specifications (example in `BuildingPredictiveModels` vignette). To set up the Bayesian Logistic Regression and run:
+```{r}
+bayesSett <- setBayesBridge(
+  seed = NULL,
+  n_iter = 10000, #number iterations
+  n_burnin = 1000, #number burn-in samples
+  bridge_exponent = 1, #accepts values in (0,1]. Strength of regularization (the smaller, the sparser)
+  regularizing_slab_size = 1, #Standard deviation of the Gaussian tail-regularizer on the bridge prior
+  thin = 1, #Number of iterations per saved sample
+  n_status_update = 10, #Number of status updates (currently somewhat broken in PLP)
+  init = list(global_scale = 0.1), #Any initial chain values for global, local scales or coefficients
+  coef_sampler_type = "cholesky", #Coefficient sampler type (accepts 'hmc', 'cholesky', 'cg')
+  params_to_fix = c(), #Fix and do not sample global or local scales
+  local_scale_sampler_type = "all", #Type of local scale sampler, best to leave as "all"
+  params_to_save = c('coef', 'global_scale', 'logp'), #saved paramaters to be output
+  fixed_effects = NULL,
+  mixture = NULL
+)
+
+res <- runPlp(
+  plpData,
+  modelSettings = bayesSett)
+```
+In the case of using any mixture priors, or imposing more fixed effects into the model, a dataframe or tibble should be provided with the named columns `covariateId`, `mean`, `sd`, that describe the effects on the covariateIds that will either not undergo shrinkage (fixed) or use the experimental mixture prior.
+
+The output of the MCMC is found in `res$model$model$samples`, where `coef` is a matrix where each row is a unique covariate, and each column is the draw for that saved iteration.
+
+Currently, the shiny app is not supported with Bayesian analyses. However, multiple analyses, and all other PLP functions will work properly.
