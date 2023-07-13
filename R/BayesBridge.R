@@ -154,6 +154,9 @@ fitBayesBridge <- function(trainData, modelSettings, analysisId, ...){
   mean_for_mixture <- Inf
   sd_for_fixed_effect <- Inf
   mean_for_fixed_effect <- Inf
+  
+  order <- colnames(matrixData)
+  
   if(settings$n_mixture > 0){
     if(length(mixture$covariateId) != length(unique(mixture$covariateId))){
       ParallelLogger::logError("Multiple means and standard deviations specified for one covariate.")
@@ -176,13 +179,18 @@ fitBayesBridge <- function(trainData, modelSettings, analysisId, ...){
     sd_for_fixed_effect <- fixed_effects$sd
     mean_for_fixed_effect <- fixed_effects$mean
   }
-
+  
   if(exists("matrixDataFixed") && exists("matrixDataMixture")){
     matrixData <- cbind(matrixDataFixed, matrixDataMixture, matrixData)
+    n_mixture <- ncol(matrixDataMixture)
   } else if (exists("matrixDataFixed") && !exists("matrixDataMixture")){
     matrixData <- cbind(matrixDataFixed, matrixData)
+    n_mixture <- 0
   } else if (!exists("matrixDataFixed") && exists("matrixDataMixture")){
     matrixData <- cbind(matrixDataMixture, matrixData)
+    n_mixture <- ncol(matrixDataMixture)
+  } else{
+    n_mixture <- 0
   }
   
   ParallelLogger::logInfo('Running BayesBridge')
@@ -194,7 +202,7 @@ fitBayesBridge <- function(trainData, modelSettings, analysisId, ...){
                         n_fixed_effect = as.integer(settings$n_fixed_effect),
                         sd_for_fixed_effect = sd_for_fixed_effect,
                         mean_for_fixed_effect = mean_for_fixed_effect,
-                        n_mixture = as.integer(settings$n_mixture),
+                        n_mixture = n_mixture,
                         sd_for_mixture = sd_for_mixture,
                         mean_for_mixture = mean_for_mixture) #param
   bridge <- instantiate_bayesbridge(model, prior)
@@ -277,6 +285,26 @@ fitBayesBridge <- function(trainData, modelSettings, analysisId, ...){
     t() %>%
     as.vector()
   covariateRef <- covariateRef %>% arrange(-abs(.data$covariateValue))
+  
+  #re-order results for Test set validation
+  if("(Intercept)" %in% rownames(modelTrained$samples$coef)){
+    order <- c(("Intercept"), order)
+  }
+  map <- match(rownames(modelTrained$samples$coef), order)
+  
+  if(!is.null(modelTrained$samples$gamma)){
+    gammaMap <- map[-1] - 1
+    names(modelTrained$samples$gamma) <- order[-1]
+    modelTrained$samples$gamma <- modelTrained$samples$gamma[order(gammaMap),]
+  }
+  if(!is.null(modelTrained$samples$local_scale)){
+    lscaleMap <- map[-1] - 1
+    names(modelTrained$samples$local_scale) <- order[-1]
+    modelTrained$samples$local_scale <- modelTrained$samples$local_scale[order(lscaleMap),]
+  }
+  
+  
+  modelTrained$samples$coef <- modelTrained$samples$coef[order(map),]
   
   #output result
   comp <- Sys.time() - start
