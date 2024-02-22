@@ -17,16 +17,16 @@
 #' @export
 #' 
 setBayesBridge <- function(seed = NULL,
-                           n_iter = 250,
-                           n_burnin = 100,
-                           bridge_exponent = 1,
+                           n_iter = 10000,
+                           n_burnin = 1000,
+                           bridge_exponent = 0.5,
                            regularizing_slab_size = 1,
                            thin = 1,
-                           n_status_update = 10,
+                           n_status_update = 100,
                            init = list(global_scale = 0.1),
-                           coef_sampler_type = "cholesky",
-                           params_to_fix = c(),
-                           local_scale_sampler_type = "all",
+                           options = list(local_scale_update = "shrunk_only",
+                                          q_update = "hierarchical"),
+                           coef_sampler_type = "cg",
                            params_to_save = c('coef', 'global_scale', 'logp'),
                            fixed_effects = NULL,
                            mixture = NULL){
@@ -35,16 +35,9 @@ setBayesBridge <- function(seed = NULL,
   }
   
   if(is.data.frame(fixed_effects)){
-    n_fixed_effects <- nrow(fixed_effects)
+    n_fixed_effect <- nrow(fixed_effects)
   } else{
-    n_fixed_effects <- 0
-  }
-  
-  if(is.data.frame(mixture)){
-    n_mixture <- nrow(mixture)
-    params_to_save <- c(params_to_save, 'gamma')
-  } else{
-    n_mixture <- 0
+    n_fixed_effect <- 0
   }
   
   param <- list()
@@ -61,16 +54,14 @@ setBayesBridge <- function(seed = NULL,
     thin = thin,
     n_status_update = n_status_update,
     init = init,
+    options = options,
     coef_sampler_type = coef_sampler_type,
-    params_to_fix = params_to_fix,
-    local_scale_sampler_type = local_scale_sampler_type,
     params_to_save = params_to_save,
     fixed_effects = fixed_effects,
-    n_fixed_effects = n_fixed_effects,
-    mixture = mixture,
-    n_mixture = n_mixture
+    n_fixed_effect = n_fixed_effect,
+    mixture = mixture
   )
-  
+
   attr(param, 'modelType') <- 'binary' 
   attr(param, 'saveType') <- 'RtoJson'
   
@@ -144,8 +135,8 @@ fitBayesBridge <- function(trainData, modelSettings, analysisId, ...){
   
   #remap covariates
   mappedData <- toSparseM(trainData)
-  matrixData <- mappedData$dataMatrix
-  colnames(matrixData) <- mappedData$covariateMap %>% arrange(columnId) %>% pull(covariateId)
+  data <- mappedData$dataMatrix
+  colnames(data) <- mappedData$covariateMap %>% arrange(columnId) %>% pull(covariateId)
   labels <- mappedData$labels
   covariateRef <- mappedData$covariateRef
   
@@ -155,89 +146,74 @@ fitBayesBridge <- function(trainData, modelSettings, analysisId, ...){
   sd_for_fixed_effect <- Inf
   mean_for_fixed_effect <- Inf
   
-  order <- colnames(matrixData)
+  order <- colnames(data)
   
-  if(settings$n_mixture > 0){
+  if(!is.null(settings$mixture)){
+    mixture <- settings$mixture %>% filter(covariateId %in% colnames(data)) %>%
+      mutate(covariateId = as.character(covariateId))
+  }
+  if(!is.null(settings$mixture)){
     if(length(mixture$covariateId) != length(unique(mixture$covariateId))){
       ParallelLogger::logError("Multiple means and standard deviations specified for one covariate.")
     }
-    mixture <- settings$mixture %>% filter(covariateId %in% colnames(matrixData)) %>%
-      mutate(covariateId = as.character(covariateId))
-    matrixDataMixture <- matrixData[,mixture$covariateId]
-    matrixData <- matrixData[,!colnames(matrixData) %in% mixture$covariateId]
+    dataMixture <- data[,mixture$covariateId]
+    data <- data[,!colnames(data) %in% mixture$covariateId]
     sd_for_mixture <- mixture$sd
     mean_for_mixture <- mixture$mean
-  } 
-  if(settings$n_fixed_effect > 0){
+  }
+  if(!is.null(settings$fixed_effects)){
     if(length(fixed_effects$covariateId) != length(unique(fixed_effects$covariateId))){
       ParallelLogger::logError("Multiple means and standard deviations specified for one covariate.")
     }
-    fixed_effects <- settings$fixed_effects %>% filter(covariateId %in% colnames(matrixData)) %>%
+    fixed_effects <- settings$fixed_effects %>% filter(covariateId %in% colnames(data)) %>%
       mutate(covariateId = as.character(covariateId))
-    matrixDataFixed <- matrixData[,fixed_effects$covariateId]
-    matrixData <- matrixData[,!colnames(matrixData) %in% fixed_effects$covariateId]
+    dataFixed <- data[,fixed_effects$covariateId]
+    data <- data[,!colnames(data) %in% fixed_effects$covariateId]
     sd_for_fixed_effect <- fixed_effects$sd
     mean_for_fixed_effect <- fixed_effects$mean
   }
   
-  if(exists("matrixDataFixed") && exists("matrixDataMixture")){
-    matrixData <- cbind(matrixDataFixed, matrixDataMixture, matrixData)
-    n_mixture <- ncol(matrixDataMixture)
-  } else if (exists("matrixDataFixed") && !exists("matrixDataMixture")){
-    matrixData <- cbind(matrixDataFixed, matrixData)
-    n_mixture <- 0
-  } else if (!exists("matrixDataFixed") && exists("matrixDataMixture")){
-    matrixData <- cbind(matrixDataMixture, matrixData)
-    n_mixture <- ncol(matrixDataMixture)
-  } else{
-    n_mixture <- 0
+  if(exists("dataFixed") && exists("dataMixture")){
+    data <- cbind(dataFixed, dataMixture, data)
+  } else if (exists("dataFixed") && !exists("dataMixture")){
+    data <- cbind(dataFixed, data)
+  } else if (!exists("dataFixed") && exists("dataMixture")){
+    data <- cbind(dataMixture, data)
   }
   
   ParallelLogger::logInfo('Running BayesBridge')
   #run BayesBridge
   start1 <- Sys.time()
-  model <- create_model(labels$outcomeCount, matrixData)
+  model <- create_model(labels$outcomeCount, data)
   prior <- create_prior(bridge_exponent = settings$bridge_exponent, #param
                         regularizing_slab_size = settings$regularizing_slab_size,
                         n_fixed_effect = as.integer(settings$n_fixed_effect),
                         sd_for_fixed_effect = sd_for_fixed_effect,
                         mean_for_fixed_effect = mean_for_fixed_effect,
-                        n_mixture = n_mixture,
                         sd_for_mixture = sd_for_mixture,
                         mean_for_mixture = mean_for_mixture) #param
   bridge <- instantiate_bayesbridge(model, prior)
-  
+
   n_iter <- settings$n_iter #param
-  
-  # Options for global scale and local scale sampling:
-  options <- list()
-  if ("global_scale" %in% settings$params_to_fix){
-    options <- list("global_scale_update" = NULL)
-    } 
-  if (settings$local_scale_sampler_type != "all"){
-    options <- c(options, list("local_scale_update" = settings$local_scale_sampler_type))
-  } else{
-    options <- NULL
-  }
-  
-  gibbs_output <- gibbs(bridge, 
+
+  gibbs_output <- gibbs(bridge,
                         n_burnin = as.integer(settings$n_burnin),
-                        n_iter = as.integer(settings$n_iter), 
+                        n_iter = as.integer(settings$n_iter),
                         init = settings$init,
                         thin = settings$thin,
                         seed = settings$seed,
                         coef_sampler_type = settings$coef_sampler_type,
                         n_status_update = settings$n_status_update,
                         params_to_save = settings$params_to_save,
-                        options = options)
-  
+                        options = settings$options)
+
   comp1 <- Sys.time() - start1
   ParallelLogger::logInfo("MCMC took ", signif(comp1, 3), " ", attr(comp1, "units"))
   
   #output modelTrained
   modelTrained <- list()
   modelTrained$samples <- gibbs_output$samples
-  rownames(modelTrained$samples$coef) <- c("(Intercept)", colnames(matrixData))
+  rownames(modelTrained$samples$coef) <- c("(Intercept)", colnames(data))
   modelTrained$coefficients <- tibble(betas = apply(modelTrained$samples$coef, 1, median),
                                       covariateIds = rownames(modelTrained$samples$coef))
   modelTrained$modelType <- "BayesBridge logistic"
@@ -247,7 +223,7 @@ fitBayesBridge <- function(trainData, modelSettings, analysisId, ...){
   #output prediction on train set
   ParallelLogger::logTrace('Getting predictions on train set')
   start2 <- Sys.time()
-  valueMed <- getLinkPostMedian(x = matrixData, betas = modelTrained$samples$coef)
+  valueMed <- getLinkPostMedian(x = data, betas = modelTrained$samples$coef)
   labels$value <- valueMed
   prediction <- labels
   comp2 <- Sys.time() - start2
