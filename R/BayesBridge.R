@@ -103,6 +103,8 @@ predictBayesBridge <- function(plpModel, data, cohort, train = FALSE){
   }
   
   #Get posterior median
+  coefOrder <- plpModel$model$samples$coefOrder[plpModel$model$samples$coefOrder != "(Intercept)"]
+  newData <- newData[, coefOrder]
   valueMed <- getLinkPostMedian(x = newData, betas = plpModel$model$samples$coef)
   
   #output
@@ -214,6 +216,7 @@ fitBayesBridge <- function(trainData, modelSettings, analysisId, ...){
   modelTrained <- list()
   modelTrained$samples <- gibbs_output$samples
   rownames(modelTrained$samples$coef) <- c("(Intercept)", colnames(data))
+  modelTrained$samples$coefOrder <- rownames(modelTrained$samples$coef)
   modelTrained$coefficients <- tibble(betas = apply(modelTrained$samples$coef, 1, median),
                                       covariateIds = rownames(modelTrained$samples$coef))
   modelTrained$modelType <- "BayesBridge logistic"
@@ -261,26 +264,6 @@ fitBayesBridge <- function(trainData, modelSettings, analysisId, ...){
     t() %>%
     as.vector()
   covariateRef <- covariateRef %>% arrange(-abs(.data$covariateValue))
-  
-  #re-order results for Test set validation
-  if("(Intercept)" %in% rownames(modelTrained$samples$coef)){
-    order <- c(("Intercept"), order)
-  }
-  map <- match(rownames(modelTrained$samples$coef), order)
-  
-  if(!is.null(modelTrained$samples$gamma)){
-    gammaMap <- map[-1] - 1
-    names(modelTrained$samples$gamma) <- order[-1]
-    modelTrained$samples$gamma <- modelTrained$samples$gamma[order(gammaMap),]
-  }
-  if(!is.null(modelTrained$samples$local_scale)){
-    lscaleMap <- map[-1] - 1
-    names(modelTrained$samples$local_scale) <- order[-1]
-    modelTrained$samples$local_scale <- modelTrained$samples$local_scale[order(lscaleMap),]
-  }
-  
-  
-  modelTrained$samples$coef <- modelTrained$samples$coef[order(map),]
   
   #output result
   comp <- Sys.time() - start

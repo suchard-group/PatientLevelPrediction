@@ -53,6 +53,7 @@ lrResults <- runPlp(plpData = plpData,
                     populationSettings = populationSettings,
                     modelSettings = lr,
                     splitSettings = splitSettings)
+coeflr <- lrResults$model$model$coefficients
 
 # Artifacts for model fitting
 # train <- readRDS("./artifacts/train.rds")
@@ -60,9 +61,13 @@ lrResults <- runPlp(plpData = plpData,
 # covariates <- readRDS("./artifacts/covariates.rds")
 
 ## configure python for bayesbridge
-bayesBridge <- setBayesBridge(n_iter = 3000,
-                              n_burnin = 500,
-                              bridge_exponent = 0.5,
+bayesBridge <- setBayesBridge(n_iter = 1000,
+                              n_burnin = 100,
+                              bridge_exponent = 1,
+                              init = list(global_scale = 0.1),
+                              options = list(local_scale_update = "shrunk_only",
+                                             global_scale_update = "None",
+                                             q_update = "simple"),
                               coef_sampler_type = "cg")
 bayesResults <- runPlp(plpData = plpData,
                        outcomeId = 3,
